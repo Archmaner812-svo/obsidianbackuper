@@ -1,0 +1,8 @@
+[package]
+name = "obsidianbackuper"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+fs_extra = "1.3"
+zip = "7.0"
