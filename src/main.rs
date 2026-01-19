@@ -1,111 +1,70 @@
-use powershell_script;
-use std::time::Duration;
-use std::{fs, io, str};
-use fs_extra::copy_items;
-use fs_extra::dir::{CopyOptions, copy, create};
-use std::thread;
-use std::os;
-use fs_extra::dir;
-use std::process::Command;
-use std::path::{self, Path};
-use std::fs::OpenOptions;
-use std::io::Write;
+mod dir;
+mod get;
+use chrono;
+use frankenstein::AsyncTelegramApi;
+use frankenstein::client_reqwest::Bot;
+use frankenstein::methods::{SendDocumentParams, SendMessageParams};
+use std::fs;
+use tokio::time::{self, Duration};
 
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    match fs::read_to_string("obsbackuptoken.txt") {
+        Ok(content) => {
+            println!("значение токена найдено")
+        }
+        Err(e) => {
+            println!("не нашли значение вашего токена(\nвведите его еще раз");
+            get::get_token();
+        }
+    }
+    let token = fs::read_to_string("obsbackuptoken.txt").unwrap();
+    let token = token.trim();
+    println!("{token}");
 
-fn main() {
-    
-    
-
-}
-
-
-
-fn get_obsidian_folder() -> String {
-    let mut obsidian_folder_path = String::new();
-    
-    io::stdin()
-        .read_line(&mut obsidian_folder_path)
-        .expect("абаюдна");
-    
-    println!("Путь получен: {}",obsidian_folder_path);
-    obsidian_folder_path.trim().to_string()
-}
-fn copy_dir_to_tmp_dir(obsidian_folder_path: &str) {
-    let tmp_dir = String::from(r"C:\ts2");
-    fs_extra::dir::create_all(&tmp_dir,true)
-        .expect("Недостаточно прав");
-    
-    println!("{}",&tmp_dir);
-    let mut options = CopyOptions::new();
-    options.copy_inside = true;
-    options.overwrite = true;
-
-    copy(obsidian_folder_path,  &tmp_dir, &options)
-    .expect("ошбика копирования");
-
-
-    
-}
-
-fn ziping_of_copy() -> bool {
-    println!("архивирование");
-    // let zip_direct =String::from(r"");
-    Command::new("powershell")
-        .args(&[
-            "-Command",
-            r"Compress-Archive -Path 'C:\ts2' -DestinationPath 'C:\ts2\obsidian_backup.zip' -Force"
-        ])
-        .status()
-        .expect("Не удалось создать архив");
-
-    let succses = true;
-    succses
-}
-fn get_obsidian_folder_name(path_to_folder:&String) -> String{
-    let path = Path::new(&path_to_folder);
-    let folder_name = path
-    .file_name()
-    .expect("Путь не содержит имени файла")
-    .to_str()
-    .expect("Имя файла не в UTF-8")
-    .to_string();
-    println!("{}",folder_name);
-
-
-
-    folder_name
-    
-}
-
-
-
-
-
-
-fn get_and_save_user_id(){
-    let mut user_id = String::new();
-    io::stdin()
-        .read_line(&mut user_id)
-        .expect("неудалось получить ваш id");
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .create(true) // создаёт файл, если не существует
-        .open("obsbackupsetting.txt")
-        .expect("Не удалось открыть файл");
-    writeln!(file,"{user_id}").expect("Не удалось запсать user id");
-    println!("если вы знаете что ошибились то найдите файл obsbackupsetting.txt и запиште туда ваш айди в телеграмм в во вторую строку");
+    match fs::read_to_string("obsbackupsetting.txt") {
+        Ok(chat_id) => {
+            println!("значение чат айди найдено");
+        }
+        Err(e) => {
+            println!("не нашли значение вашего чат айди\nвведите его еще раз");
+            get::get_and_save_user_id();
+        }
     };
-        
-}
+    let bot = Bot::new(token);
+    let chat_id = fs::read_to_string("obsbackupsetting.txt").expect("");
+    println!("{chat_id}");
 
-fn get_token(){
-    println!("Напиши токен своего бота");
-    let mut token = String::new();
-    io::stdin()
-        .read_line(&mut token)
-        .expect("");
-    token = format!("$env:TELOXIDE_TOKEN={}>",token);
-    println!("{}",token)
+    let obsfoleder = get::get_obsidian_folder();
+    println!("бот запущен");
+    let mut interval = time::interval(Duration::from_secs(3600));
 
+    let chat_id: i64 = chat_id
+        .trim()
+        .parse()
+        .expect("Не удалось преобразовать строку в i64");
+    println!("{chat_id}");
+
+    loop {
+        dir::movedir(&obsfoleder);
+        dir::ziping_of_copy();
+        interval.tick().await;
+
+        let params = SendMessageParams::builder()
+            .chat_id(chat_id)
+            .text("начинаем отправку")
+            .build();
+        println!("отправлен лог об начале отправки");
+        // let now = chrono::offset::Utc::now();
+        bot.send_message(&params).await.unwrap();
+        let file = std::path::PathBuf::from(r"C:\obsidianbuckupdir\obsidian_backup.zip");
+        let params = SendDocumentParams::builder()
+            .chat_id(chat_id)
+            .document(file)
+            .caption("Вот ваш файл!") // Опционально
+            .build();
+        bot.send_document(&params).await.unwrap();
+        println!("отправлен архив");
+        interval.tick().await;
+    }
 }
