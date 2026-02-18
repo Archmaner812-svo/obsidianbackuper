@@ -1,10 +1,10 @@
 mod dir;
 mod get;
-use chrono;
 use frankenstein::AsyncTelegramApi;
 use frankenstein::client_reqwest::Bot;
 use frankenstein::methods::{SendDocumentParams, SendMessageParams};
 use std::fs;
+use std::sync::Arc;
 use tokio::time::{self, Duration};
 
 #[tokio::main]
@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
             get::get_and_save_user_id();
         }
     };
-    let bot = Bot::new(token);
+    let bot = Arc::new(Bot::new(token));
     let chat_id = fs::read_to_string("obsbackupsetting.txt").expect("");
     println!("{chat_id}");
 
@@ -47,23 +47,47 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         dir::movedir(&obsfoleder);
-        dir::ziping_of_copy();
-        interval.tick().await;
-
+        let file = dir::ziping_of_copy();
         let params = SendMessageParams::builder()
             .chat_id(chat_id)
             .text("начинаем отправку")
             .build();
         println!("отправлен лог об начале отправки");
-        // let now = chrono::offset::Utc::now();
         bot.send_message(&params).await.unwrap();
-        let file = std::path::PathBuf::from(r"C:\obsidianbuckupdir\obsidian_backup.zip");
-        let params = SendDocumentParams::builder()
+
+        let send_params = SendDocumentParams::builder()
             .chat_id(chat_id)
-            .document(file)
-            .caption("Вот ваш файл!") // Опционально
+            .document(file.clone())
+            .caption("Вот ваш файл!")
             .build();
-        bot.send_document(&params).await.unwrap();
+
+        let bot_clone = Arc::clone(&bot);
+        let send_task = tokio::spawn(async move { bot_clone.send_document(&send_params).await });
+
+        let start = std::time::Instant::now();
+        let dots = ["|", "/", "-", "\\"];
+        let mut i = 0;
+
+        while !send_task.is_finished() {
+            print!(
+                "\r{} {:.1}s",
+                dots[i % dots.len()],
+                start.elapsed().as_secs_f32()
+            );
+            std::io::Write::flush(&mut std::io::stdout()).unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            i += 1;
+        }
+
+        let result = send_task.await.unwrap();
+        match result {
+            Ok(_) => println!(
+                "\r✅ Отправлено! За {:.1}s          ",
+                start.elapsed().as_secs_f32()
+            ),
+            Err(_e) => println!("\r❌ Ошибка!                      "),
+        }
+
         println!("отправлен архив");
         interval.tick().await;
     }
